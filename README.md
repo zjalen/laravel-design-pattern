@@ -21,7 +21,7 @@
 
 ### routes 路由
 
-因为 Lumen 一般只面向 api 请求处理，因此不必区分 `web` 与 `api`，但如果路由组特别多，或需要更明确的分组时，例如区分 api 版本，也可以拆分成多个文件以供使用，注意新增加的文件，需要在 `bootstrap/app.php` 中添加或使用 `ServiceProvider` 注册。
+因为 `Lumen` 一般只面向 api 请求处理，因此不必区分 `web` 与 `api`，但如果路由组特别多，或需要更明确的分组时，例如区分 api 版本，也可以拆分成多个文件以供使用，注意新增加的文件，需要在 `bootstrap/app.php` 中添加或使用 `ServiceProvider` 注册。
 
 ### Http 请求控制
 
@@ -32,6 +32,76 @@
 #### ApiResponse 格式化 Api 输出规范
 
 该类继承自 `Illuminate\Support\Facades\Response`，实现两个静态方法，`success` 表示返回成功的 api 请求结果，`fail` 表示返回失败的 api 请求结果。
+
+`Lumen` 中默认不开启 `Facede` 门面类，推荐直接在 `Http` 中定义一个类 `ApiResponse`；
+
+```php
+<?php
+
+
+namespace App\Http;
+
+
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Response;
+
+/**
+ * Notes:
+ * User: jialinzhang
+ * DateTime: 2021/5/17 15:17
+ */
+class ApiResponse extends Response
+{
+    public static function success($data = null, $code = 1, $statusCode = 200): JsonResponse
+    {
+        $content = [
+            'code' => $code,
+            'data' => $data
+        ];
+        $statusCode = $statusCode ?: $code;
+        return response()->json($content, $statusCode)->setEncodingOptions(JSON_UNESCAPED_UNICODE);
+    }
+
+    public static function fail($errMsg = null, $code = 400, $statusCode = 400): JsonResponse
+    {
+        $content = [
+            'code' => $code,
+            'errMsg' => $errMsg
+        ];
+        $statusCode = $statusCode ?: $code;
+        return response()->json($content, $statusCode)->setEncodingOptions(JSON_UNESCAPED_UNICODE);
+    }
+}
+```
+`Laravel` 该项目中，演示了直接在 `CustomServiceProvider` 中使用 `macro` 方法挂载两个新的方法的使用方式：
+
+```php
+/**
+ * Register services.
+ *
+ * @return void
+ */
+public function register()
+{
+    Response::macro('success', function ($data = null, $code = 1, $statusCode = 200) {
+        $content = [
+            'code' => $code,
+            'data' => $data
+        ];
+        $statusCode = $statusCode ?: $code;
+        return Response::json($content, $statusCode)->setEncodingOptions(JSON_UNESCAPED_UNICODE);
+    });
+
+    Response::macro('fail', function ($errorMessage = null, $code = 400, $statusCode = 400) {
+        $content = [
+            'code' => $code,
+            'errMsg' => $errorMessage
+        ];
+        $statusCode = $statusCode ?: $code;
+        return Response::json($content, $statusCode)->setEncodingOptions(JSON_UNESCAPED_UNICODE);
+    });
+}
+```
 
 `Response` 请求结果包含 3 个部分，其中 `code` 与 `httpCode` 公用，成功时另外包含 `data`，失败时另外包含 `errMsg`：
 - `data` api 成功数据部分，表示正确请求结果的数据内容
@@ -50,6 +120,8 @@
 ### Exceptions 异常控制类
 
 #### Handler.php 全局异常处理
+
+`Larvavel` 当前版本中，使用了 `register` 方法来注册 `reportable` 和 `renderable` 两种不同处理逻辑，旧版本以及 `Lumen` 版本中采用的是单独的方法来处理相应逻辑，原理是一致的。
 
 - `$dontReport` 用以记录无需记录日志的异常类，如 `HttpException` 一般直接输出给 api 请求方，无需记录
 - `report` 方法用以处理异常日志的记录，无需输出渲染
@@ -116,12 +188,12 @@ function getUserById(int $id)
 
 ## MVC 分层处理
 
-框架处理流程为，api 请求进入到 `Lumen` 框架，经由控制器（Controller 层）调用服务层（Service 层）进行业务处理，服务层可能需要调用其它同一层级的服务，或需要调用数据层（Repository 层）进行数据库业务调用，数据层调用数据模型（Model 层）进行数据库操作。最后将处理结果返回给 api 调用方。
+框架处理流程为，api 请求进入到 `Laravel/Lumen` 框架，经由控制器（Controller 层）调用服务层（Service 层）进行业务处理，服务层可能需要调用其它同一层级的服务，或需要调用数据层（Repository 层）进行数据库业务调用，数据层调用数据模型（Model 层）进行数据库操作。最后将处理结果返回给 api 调用方。
 
 其中 Service、Repository、Model 从划分上属于 MVC 中的 **Model 层**，Controller 属于 MVC 中的 **Controller 层**，api 属于前后端分离，后端只提供数据给前端，不涉及到数据展示，因此不存在 **View 层**，或者我们可以将 `ApiResponse` 中将数据格式化为符合前端要求的 json 看所是 **View 层** 的作用。
 
 - `Controller` 控制层，负责 api 请求的业务控制，将业务请求派发给指定的服务进行处理，与官方演示代码不同，Controller 一般不直接放任何实际的业务逻辑
 - `Service` 服务层，负责处理主要的业务逻辑和算法，数据处理的业务逻辑将调用数据控制层处理
 - `Repository` 数据控制层，负责处理数据增删改查等与数据操作直接相关的业务逻辑
-- `Model` 数据模型，Model 在 Lumen 中主要负责辅助 Repository 层来进行数据库操作，它的成员变量**应该**与数据库字段一一对应，以方便在实际操作中更容易做到针对性的赋值、取值等操作，一些属性格式化等操作可以放置在 Model 中，但一般不放实际的业务逻辑
+- `Model` 数据模型，Model 在 `Laravel/Lumen` 中主要负责辅助 Repository 层来进行数据库操作，它的成员变量**应该**与数据库字段一一对应，以方便在实际操作中更容易做到针对性的赋值、取值等操作，一些属性格式化等操作可以放置在 Model 中，但一般不放实际的业务逻辑
 
